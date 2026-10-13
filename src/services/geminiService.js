@@ -55,7 +55,10 @@ function buildSystemInstruction(userName, context = {}) {
 [Instruções de Contexto Atual]
 ${locationContext}
 - Responda de acordo com a sua personalidade e base de conhecimento.
-- Use a formatação do WhatsApp (*negrito*, _itálico_, listas) quando apropriado.
+- Em cumprimentos, mensagens curtas ou perguntas simples, responda de forma CURTA E DIRETA (1 a 2 frases curtas).
+- NÃO fique repetindo o nome do usuário a todo momento. Use com moderação, quase nunca.
+- Evite bordões e frases repetitivas. Varie seu vocabulário como alguém real no WhatsApp.
+- Use a formatação do WhatsApp (*negrito*, _itálico_) quando apropriado.
 - Seja natural, envolvente e nunca quebre o personagem a menos que solicitado.`;
   }
 
