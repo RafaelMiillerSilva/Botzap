@@ -114,65 +114,94 @@ export async function handleIncomingMessages(sock, m) {
   // Não processa comandos emitidos pelo próprio bot
   if (isFromMe) return;
 
-  // Verifica menção direta ao bot
-  const mentionedJids = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+  // Verifica menção direta ao bot (@bot) ou mensagem respondendo/citando o bot
+  const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+  const mentionedJids = contextInfo?.mentionedJid || [];
   const isBotMentioned = mentionedJids.some((j) => cleanJid(j) === botJid);
+  const isReplyingToBot = contextInfo?.participant && cleanJid(contextInfo.participant) === botJid;
 
   // ==========================================
   // 🤖 RESPOSTA COM INTELIGÊNCIA ARTIFICIAL (GEMINI)
   // ==========================================
   const prefix = config.botPrefix;
   const isAiCommand = text.startsWith(`${prefix}ia `) || text.startsWith(`${prefix}ai `);
+  const isPrivateChat = !isGroup && !text.startsWith(prefix);
 
-  if (isAiCommand || (isGroup && isBotMentioned)) {
+  // Opção 2: Palavras-chave que chamam o bot no grupo mesmo sem @
+  const lowerText = text.toLowerCase();
+  const triggerKeywords = [
+    'saimon',
+    'zapbot',
+    'bot',
+    'robô',
+    'robo',
+    'joão marcelo',
+    'joao marcelo',
+  ];
+  const containsTriggerKeyword = isGroup && triggerKeywords.some((kw) => lowerText.includes(kw));
+
+  // Opção 3: Modo "intrometido" com chance aleatória em mensagens comuns de grupo
+  const isRandomIntervention =
+    isGroup &&
+    !text.startsWith(prefix) &&
+    !isBotMentioned &&
+    !isReplyingToBot &&
+    !containsTriggerKeyword &&
+    text.length >= 4 &&
+    Math.random() < config.groupRandomReplyChance;
+
+  const shouldTriggerAi =
+    isAiCommand ||
+    isPrivateChat ||
+    (isGroup && (isBotMentioned || isReplyingToBot || containsTriggerKeyword || isRandomIntervention));
+
+  if (shouldTriggerAi) {
     let question = text;
 
     if (isAiCommand) {
       question = text.replace(new RegExp(`^${prefix}(ia|ai)\\s+`, 'i'), '').trim();
-    } else if (isBotMentioned) {
+    } else if (isBotMentioned || isReplyingToBot) {
       // Remove menções de marcação do texto
       question = text.replace(/@\d+/g, '').trim();
     }
 
     if (!question) {
-      await sock.sendMessage(
-        remoteJid,
-        {
-          text: `💡 Olá! Para falar com a Inteligência Artificial, digite *${prefix}ia sua pergunta* ou me marque com sua dúvida!`,
-        },
-        { quoted: msg }
-      );
-      return;
+      question = 'Opa, me chamou por quê? O que manda?';
     }
 
-    console.log(`🤖 Processando pergunta de IA para ${senderJid}: "${question}"`);
+    if (isRandomIntervention) {
+      console.log(`🎲 Intervenção aleatória de ${config.botName} ativada no grupo para ${senderJid}: "${question}"`);
+    } else if (containsTriggerKeyword) {
+      console.log(`🎯 Palavra-chave detectada na mensagem de ${senderJid}: "${question}"`);
+    } else {
+      console.log(`🤖 Processando pergunta de IA para ${senderJid}: "${question}"`);
+    }
 
-    // Indicador visual de resposta (reação de "pensando")
+    // Ativa o status visual de 'digitando...' no WhatsApp
     try {
-      await sock.sendMessage(remoteJid, {
-        react: { text: '⏳', key: msg.key },
-      });
+      await sock.sendPresenceUpdate('composing', remoteJid);
     } catch {}
 
     const aiResponse = await askGemini(question, {
       userName: msg.pushName || senderJid.split('@')[0],
-      groupName: groupMetadata?.subject || 'Grupo',
+      isGroup: isGroup,
+      groupName: isGroup ? (groupMetadata?.subject || 'Grupo') : '',
     });
 
-    await sock.sendMessage(
-      remoteJid,
-      {
-        text: `🤖 *${config.botName} (IA):*\n\n${aiResponse}`,
-      },
-      { quoted: msg }
-    );
-
-    // Reação de concluído
     try {
+      await sock.sendMessage(
+        remoteJid,
+        {
+          text: aiResponse,
+        },
+        { quoted: msg }
+      );
+    } catch (sendErr) {
+      console.warn(`⚠️ Envio com citação falhou, enviando direto: ${sendErr?.message}`);
       await sock.sendMessage(remoteJid, {
-        react: { text: '✅', key: msg.key },
+        text: aiResponse,
       });
-    } catch {}
+    }
 
     return;
   }

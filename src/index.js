@@ -1,7 +1,9 @@
+import fs from 'fs';
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
+  Browsers,
 } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
@@ -26,7 +28,8 @@ async function startBot() {
     auth: state,
     logger: pino({ level: 'silent' }), // Log limpo no terminal
     printQRInTerminal: false,
-    browser: [config.botName, 'Desktop', '1.0.0'],
+    browser: Browsers.windows('Desktop'),
+    syncFullHistory: false,
     generateHighQualityLinkPreview: true,
   });
 
@@ -86,8 +89,20 @@ async function startBot() {
         }
       } else {
         console.log(
-          '❌ Sessão desconectada ou desconectada pelo aparelho. Remova a pasta "auth_info" se quiser gerar um novo QR Code e reinicie.'
+          '❌ Sessão desconectada pelo WhatsApp. Limpando credenciais antigas para gerar um novo QR Code...'
         );
+        try {
+          fs.rmSync('./auth_info', { recursive: true, force: true });
+        } catch (e) {}
+
+        if (!isRestarting) {
+          isRestarting = true;
+          console.log('🔄 Gerando novo QR Code em 3 segundos...');
+          setTimeout(() => {
+            isRestarting = false;
+            startBot();
+          }, 3000);
+        }
       }
     }
   });
