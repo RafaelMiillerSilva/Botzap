@@ -7,7 +7,7 @@ export const config = {
   
   // Google Gemini AI
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-lite-latest',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite',
   botPersona: process.env.BOT_PERSONA || '',
   groupRandomReplyChance: parseFloat(process.env.GROUP_RANDOM_REPLY_CHANCE || '0.20'),
   

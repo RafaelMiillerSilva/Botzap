@@ -99,9 +99,10 @@ npm start
 ## 📋 Lista de Comandos
 
 | Comando | Descrição | Quem pode usar |
-|---|---|---|
+| --- | --- | --- |
 | `!menu` ou `!ajuda` | Mostra todos os comandos disponíveis | Todos |
 | `!ia <pergunta>` | Envia uma pergunta para a IA do Gemini responder no grupo | Todos |
+| `!ia` (com foto/vídeo) | Envia ou cita uma imagem/vídeo para a IA analisar | Todos |
 | `@ZapBot <pergunta>` | Marcando o bot diretamente no grupo, ele responderá com IA | Todos |
 | `!regras` | Mostra as regras e condutas do grupo | Todos |
 | `!ping` | Testa se o bot está ativo e mostra a latência | Todos |
@@ -114,7 +115,7 @@ npm start
 
 ## 📁 Estrutura de Arquivos
 
-```
+```text
 Botzap/
 ├── auth_info/             # Credenciais da sessão do WhatsApp (gerado automaticamente)
 ├── src/

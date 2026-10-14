@@ -1,3 +1,8 @@
+import dns from 'dns';
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {}
+
 import fs from 'fs';
 import makeWASocket, {
   DisconnectReason,

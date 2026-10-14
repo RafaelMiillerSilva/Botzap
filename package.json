@@ -5,8 +5,8 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "start": "node --dns-result-order=ipv4first src/index.js",
+    "dev": "node --dns-result-order=ipv4first --watch src/index.js"
   },
   "dependencies": {
     "@google/genai": "^2.29.0",

@@ -1,7 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import dns from 'dns';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
+
+// No Windows, força resolução IPv4 primeiro para evitar timeouts de conexão (UND_ERR_CONNECT_TIMEOUT)
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {}
 
 let client = null;
 
@@ -74,6 +80,23 @@ Diretrizes:
 - Não invente informações; se não souber, admita com honestidade.`;
 }
 
+// Memória conversacional em memória (chatId -> { lastUpdated: number, history: Array })
+const conversationHistory = new Map();
+const MAX_HISTORY_TURNS = 10; // Últimas 10 mensagens (5 trocas completas de contexto)
+const INACTIVITY_TIMEOUT_MS = 25 * 60 * 1000; // 25 minutos sem mensagem reinicia o assunto
+
+/**
+ * Limpa o histórico de memória de um chat/grupo específico
+ * @param {string} chatId JID do grupo ou usuário
+ */
+export function clearChatMemory(chatId) {
+  if (conversationHistory.has(chatId)) {
+    conversationHistory.delete(chatId);
+    return true;
+  }
+  return false;
+}
+
 /**
  * Envia uma pergunta para o Google Gemini e retorna a resposta formatada para WhatsApp.
  * @param {string} prompt Texto ou dúvida do usuário
@@ -88,38 +111,121 @@ export async function askGemini(prompt, context = {}) {
 
   const userName = context.userName || 'Membro';
   const systemInstruction = buildSystemInstruction(userName, context);
+  const chatId = context.chatId || null;
+
+  // Recupera histórico recente da conversa (se houver)
+  let history = [];
+  if (chatId) {
+    let session = conversationHistory.get(chatId);
+    if (session) {
+      if (Date.now() - session.lastUpdated > INACTIVITY_TIMEOUT_MS) {
+        conversationHistory.delete(chatId);
+      } else {
+        history = [...session.history];
+      }
+    }
+  }
+
+  // Prepara as partes da mensagem atual
+  const currentParts = [];
+  if (context.media?.buffer) {
+    currentParts.push({
+      inlineData: {
+        mimeType: context.media.mimeType || 'image/jpeg',
+        data: context.media.buffer.toString('base64'),
+      },
+    });
+  }
+
+  const userText = context.isGroup
+    ? `[${userName}]: ${prompt || (context.media ? 'Enviou uma imagem/vídeo.' : '')}`
+    : (prompt || (context.media ? 'Enviou uma imagem/vídeo.' : ''));
+
+  currentParts.push({ text: userText });
+
+  const contents = [
+    ...history,
+    {
+      role: 'user',
+      parts: currentParts,
+    },
+  ];
 
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const maxAttempts = 3;
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const response = await gemini.models.generateContent({
         model: config.geminiModel,
-        contents: prompt,
+        contents,
         config: {
           systemInstruction,
           maxOutputTokens: 350,
         },
       });
 
-      return response.text || 'Não consegui formular uma resposta no momento.';
+      const replyText = response.text || 'Não consegui formular uma resposta no momento.';
+
+      // Salva no histórico da conversa para manter contexto nas próximas respostas
+      if (chatId) {
+        let session = conversationHistory.get(chatId);
+        if (!session) {
+          session = { history: [], lastUpdated: Date.now() };
+          conversationHistory.set(chatId, session);
+        }
+
+        // Sanitiza para não guardar buffers grandes na memória RAM
+        const sanitizedParts = currentParts.map((p) => {
+          if (p.inlineData) {
+            return { text: '[Mídia/Imagem/Vídeo anexado]' };
+          }
+          return p;
+        });
+
+        session.history.push({ role: 'user', parts: sanitizedParts });
+        session.history.push({ role: 'model', parts: [{ text: replyText }] });
+
+        if (session.history.length > MAX_HISTORY_TURNS) {
+          session.history = session.history.slice(-MAX_HISTORY_TURNS);
+        }
+        session.lastUpdated = Date.now();
+      }
+
+      return replyText;
     } catch (error) {
       const errMsg = error?.message || String(error);
+      const errCause = error?.cause?.message || error?.cause?.code || '';
       const isRateLimit = errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('RESOURCE_EXHAUSTED');
+      const isNetworkError =
+        errMsg.includes('fetch failed') ||
+        errMsg.includes('timeout') ||
+        errMsg.includes('ETIMEDOUT') ||
+        errMsg.includes('ECONNRESET') ||
+        errCause.includes('UND_ERR_CONNECT_TIMEOUT');
 
-      if (isRateLimit && attempt === 1) {
-        console.warn('⚠️ Limite temporário da API (429) atingido. Aguardando 2 segundos e tentando novamente...');
-        await wait(2000);
+      const isServerError =
+        errMsg.includes('503') ||
+        errMsg.includes('500') ||
+        errMsg.includes('UNAVAILABLE') ||
+        errMsg.includes('INTERNAL');
+
+      if ((isRateLimit || isNetworkError || isServerError) && attempt < maxAttempts) {
+        const delayMs = attempt * 1500;
+        console.warn(
+          `⚠️ Falha temporária na chamada (${errMsg}${errCause ? ` - ${errCause}` : ''}) [Tentativa ${attempt}/${maxAttempts}]. Aguardando ${delayMs / 1000}s e tentando novamente...`
+        );
+        await wait(delayMs);
         continue;
       }
 
-      console.error('❌ Erro na chamada à API Gemini:', errMsg);
+      console.error('❌ Erro na chamada à API Gemini:', errMsg, errCause ? `(Causa: ${errCause})` : '');
 
       if (isRateLimit) {
         return 'Muita resenha acontecendo ao mesmo tempo na minha mente... dá uma segurada de alguns segundos e me chama de novo!';
       }
 
-      return 'Tive uma breve interferência aqui nas sombras... tenta me mandar de novo daqui a pouco!';
+      return 'Opa, deu uma chiada no meu rádio aqui, sô... Manda de novo que o bicho pega!';
     }
   }
 }
